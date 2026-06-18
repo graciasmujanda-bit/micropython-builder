@@ -1,134 +1,54 @@
-name: Build binaries
+name: Build MicroPython + ulab (NUCLEO-F446RE)
 
 on:
-  schedule:
-    - cron: "0 3 */2 * *"
   push:
-    branches:
-        - master
-  pull_request:
-    paths:
-    - '.github/workflows/*.yml'
-    - './scripts/*.sh'
+    branches: [ master, main ]
+  workflow_dispatch: # Permet de lancer la compilation manuellement
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Get current date
-        id: date
-        run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+      - name: Install Toolchain ARM & Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi build-essential libnewlib-arm-none-eabi python3
 
-      - name: Checkout builder
-        uses: actions/checkout@v1
+      - name: Clone MicroPython
+        run: |
+          git clone https://github.com/micropython/micropython.git
+          cd micropython
+          git submodule update --init lib/pico lib/cmsis lib/stm32lib
 
-      - name: Install arm toolchain
-        run: ./scripts/install_arm.sh
+      - name: Clone ulab
+        run: |
+          git clone https://github.com/v923z/ulab.git
 
-      - name: Install ESP-IDF toolchain
-        run: ./scripts/install_espidf.sh
+      - name: Build mpy-cross (MicroPython Compiler)
+        run: |
+          make -C micropython/mpy-cross
 
-      - name: Checkout ulab/micropython
-        run: ./scripts/init.sh
+      - name: Build NUCLEO_F446RE Firmware
+        run: |
+          # On se place dans le dossier du port STM32
+          cd micropython/ports/stm32
+          
+          # Compilation avec l'option USER_C_MODULES pointant vers ulab
+          # On utilise l'argument absolute path pour éviter les erreurs
+          make BOARD=NUCLEO_F446RE USER_C_MODULES=../../../ulab/code/micropython.cmake
+          
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p build_output
+          cp micropython/ports/stm32/build-NUCLEO_F446RE/firmware.bin build_output/micropython-nucleo-f446re-ulab.bin
+          cp micropython/ports/stm32/build-NUCLEO_F446RE/firmware.hex build_output/micropython-nucleo-f446re-ulab.hex
 
-      - name: Create artifacts directory
-        run: mkdir ./artifacts
-
-      # this section is only for test purposes
-      # - name: Compile unix port
-      #   if: always()
-      # #   run: ./scripts/unix.sh
-
-      - name: Compile for Adafruit Feather RP2040
-        if: always()
-        run: ./scripts/rp2/adafruit_feather_rp2040.sh
-
-      - name: Compile for Adafruit Itsybitsy RP2040
-        if: always()
-        run: ./scripts/rp2/adafruit_itsybitsy_rp2040.sh
-
-      - name: Compile for Adafruit QTPY RP2040
-        if: always()
-        run: ./scripts/rp2/adafruit_qtpy_rp2040.sh
-
-      - name: Compile for Pimoroni Pico Lipo 4MB
-        if: always()
-        run: ./scripts/rp2/pimoroni_picolipo_4MB.sh
-
-      - name: Compile for Pimoroni Pico Lipo 16MB
-        if: always()
-        run: ./scripts/rp2/pimoroni_picolipo_16MB.sh
-
-      - name: Compile for raspberry nano
-        if: always()
-        run: ./scripts/rp2/arduino_nano_connect.sh
-
-      - name: Compile for raspberry pico
-        if: always()
-        run: ./scripts/rp2/pico.sh
-
-      - name: Compile for raspberry pico with UART and VFAT support
-        if: always()
-        run: ./scripts/rp2/pico_uart_vfat.sh
-
-      - name: Compile for raspberry pico W
-        if: always()
-        run: ./scripts/rp2/pico_w.sh
-
-      - name: Compile for raspberry pico 2
-        if: always()
-        run: ./scripts/rp2/pico2.sh
-
-      - name: Compile for raspberry pico 2W
-        if: always()
-        run: ./scripts/rp2/pico2_w.sh
-
-      - name: Compile for PYBD_SF6
-        if: always()
-        run: ./scripts/stm32/pybd_sf6.sh
-
-      - name: Compile for pybv10 board
-        if: always()
-        run: ./scripts/stm32/pybv10.sh
-
-      - name: Compile for pybv11 board
-        if: always()
-        run: ./scripts/stm32/pybv11.sh
-
-      - name: Compile for ESP32 GENERIC 
-        if: always()
-        run: ./scripts/esp32/generic.sh
-
-      - name: Compile for ESP32 GENERIC C3 
-        if: always()
-        run: ./scripts/esp32/generic-c3.sh
-
-      - name: Compile for ESP32 S2
-        if: always()
-        run: ./scripts/esp32/generic-s2.sh
-
-      - name: Compile for ESP32 S3
-        if: always()
-        run: ./scripts/esp32/generic-s3.sh
-
-      # Take this out for now
-      # - name: Compile for ESP32 UNICORE
-      #   if: always()
-      #   run: ./scripts/esp32/unicore.sh
-
-      - name: Compile for Sparkfun SAMD51 Thing Plus
-        if: always()
-        run: ./scripts/samd/sparkfun_thing_plus.sh
-
-      - name: Compile for Teensy 41
-        if: always()
-        run: ./scripts/mimxrt/teensy41.sh
-
-      - uses: "marvinpinto/action-automatic-releases@latest"
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v3
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: false
-          automatic_release_tag: "latest"
-          title: "Release date ${{ steps.date.outputs.date }}"
-          files: ./artifacts/*
+          name: MicroPython-ulab-NUCLEO_F446RE
+          path: build_output/

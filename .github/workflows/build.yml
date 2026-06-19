@@ -1,54 +1,45 @@
-name: Build MicroPython + ulab (NUCLEO-F446RE)
+name: Build STM32 MicroPython HEX (uLab)
 
 on:
-  push:
-    branches: [ master, main ]
-  workflow_dispatch: # Permet de lancer la compilation manuellement
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Install Toolchain ARM & Dependencies
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-none-eabi build-essential libnewlib-arm-none-eabi python3
+          sudo apt-get install -y gcc-arm-none-eabi make python3 git
 
       - name: Clone MicroPython
         run: |
           git clone https://github.com/micropython/micropython.git
           cd micropython
-          git submodule update --init lib/pico lib/cmsis lib/stm32lib
+          git checkout v1.23.0
+          git submodule update --init --recursive
 
-      - name: Clone ulab
+      - name: Clone uLab
         run: |
-          git clone https://github.com/v923z/ulab.git
+          git clone https://github.com/v923z/micropython-ulab.git ulab
 
-      - name: Build mpy-cross (MicroPython Compiler)
+      - name: Build firmware (FAST)
         run: |
-          make -C micropython/mpy-cross
-
-      - name: Build NUCLEO_F446RE Firmware
-        run: |
-          # On se place dans le dossier du port STM32
           cd micropython/ports/stm32
-          
-          # Compilation avec l'option USER_C_MODULES pointant vers ulab
-          # On utilise l'argument absolute path pour éviter les erreurs
-          make BOARD=NUCLEO_F446RE USER_C_MODULES=../../../ulab/code/micropython.cmake
-          
-      - name: Prepare Artifacts
-        run: |
-          mkdir -p build_output
-          cp micropython/ports/stm32/build-NUCLEO_F446RE/firmware.bin build_output/micropython-nucleo-f446re-ulab.bin
-          cp micropython/ports/stm32/build-NUCLEO_F446RE/firmware.hex build_output/micropython-nucleo-f446re-ulab.hex
+          make BOARD=NUCLEO_F446RE \
+          USER_C_MODULES=../../../ulab/code/micropython.cmake \
+          CFLAGS_EXTRA="-DMODULE_ULAB_ENABLED=1" \
+          -j4
 
-      - name: Upload Firmware
-        uses: actions/upload-artifact@v3
+      - name: Convert to HEX
+        run: |
+          arm-none-eabi-objcopy -O ihex \
+          micropython/ports/stm32/build-NUCLEO_F446RE/firmware.elf \
+          firmware.hex
+
+      - name: Upload HEX
+        uses: actions/upload-artifact@v4
         with:
-          name: MicroPython-ulab-NUCLEO_F446RE
-          path: build_output/
+          name: firmware-hex
+          path: firmware.hex
